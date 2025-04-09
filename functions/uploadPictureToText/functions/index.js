@@ -40,8 +40,9 @@ exports.onImageUpload = onObjectFinalized({
     
     console.log('検出されたテキスト:', detectedText);
     
-    // 出力ファイル名を作成（拡張子をtxtに変更）
-    const outputFileName = filePath.replace(fileExtension, '.txt');
+    // 出力ファイル名を変更 - 同じディレクトリに ocr_result.txt として保存
+    const dirName = path.dirname(filePath);
+    const outputFileName = path.join(dirName, 'ocr_result.txt');
     
     // テキストファイルをアップロード
     await bucket.file(outputFileName).save(detectedText, {
