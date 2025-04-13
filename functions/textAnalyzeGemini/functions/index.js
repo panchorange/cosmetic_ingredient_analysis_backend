@@ -51,7 +51,7 @@ exports.textAnalyzeGemini = onObjectFinalized({
     }
 
     // Google Gemini APIの設定
-    const API_KEY = 'AIzaSyD-vVGrCDNuRoppRc5L13nM9YuMX6kFrHk';
+    const API_KEY = 'あなたのAPI';
     const genAI = new GoogleGenerativeAI(API_KEY);
     
     // Gemini 1.5 Flashモデルを使用
