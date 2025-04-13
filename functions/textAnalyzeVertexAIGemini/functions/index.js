@@ -1,10 +1,10 @@
 const { onObjectFinalized } = require('firebase-functions/v2/storage');
 const admin = require('firebase-admin');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { VertexAI } = require('@google-cloud/vertexai');
 const path = require('path');
 admin.initializeApp();
 
-exports.textAnalyzeGemini = onObjectFinalized({
+exports.textAnalyzeVertexGemini = onObjectFinalized({
   bucket: 'cosmetic-ingredient-analysis.firebasestorage.app',
   eventType: 'google.storage.object.finalize',
   matchPath: '/cosmes/**/ocr_result.txt',  // ocr_result.txtファイルのみ処理
@@ -17,13 +17,6 @@ exports.textAnalyzeGemini = onObjectFinalized({
   console.log('アップロードされたファイル: ' + fileName);
   console.log('ファイルサイズ: ' + fileSize);
   console.log('ファイルタイプ: ' + fileType);
-
-  // errorsディレクトリ内のファイルかどうかをチェック
-  const pathParts = fileName.split('/');
-  if (pathParts.includes('errors')) {
-    console.log('errorsディレクトリ内のファイルのためスキップします: ' + fileName);
-    return null;
-  }
 
   const bucket = admin.storage().bucket();
   const fileObject = bucket.file(fileName);
@@ -50,12 +43,15 @@ exports.textAnalyzeGemini = onObjectFinalized({
       profileText = 'プロファイル情報がありません';
     }
 
-    // Google Gemini APIの設定
-    const API_KEY = 'AIzaSyD-vVGrCDNuRoppRc5L13nM9YuMX6kFrHk';
-    const genAI = new GoogleGenerativeAI(API_KEY);
+    // Google Vertex AI の設定
+    const projectId = 'cosmetic-ingredient-analysis'; // あなたのGCPプロジェクトIDを設定
+    const location = 'us-central1'; // 適切なロケーションを設定
+    const vertexAI = new VertexAI({project: projectId, location: location});
     
-    // Gemini 1.5 Flashモデルを使用
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    // Gemini 1.5 Flash モデルのインスタンスを取得
+    const generativeModel = vertexAI.preview.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+    });
 
     // プロンプトの作成 - OCR結果とプロファイルを別々に指定
     const prompt = `
@@ -105,10 +101,13 @@ ${profileText}
   "overall_assessment": "この製品は基本的な保湿成分は優れていますが、含有されている防腐剤と香料が肌質に合わない可能性があります。無香料タイプを検討されることをお勧めします。"
 }`;
 
-    // Gemini APIを呼び出し
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const textResponse = response.text();
+    // Vertex AI Gemini API を呼び出し
+    const result = await generativeModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    });
+    
+    const response = result.response;
+    const textResponse = response.candidates[0].content.parts[0].text;
     
     // レスポンステキストをJSONに変換
     let resultJson;
@@ -138,7 +137,7 @@ ${profileText}
 
     console.log('整形済みJSONファイルが保存されました: ' + outputFileName);
   } catch (error) {
-    // エラー情報のログ出力のみを行う（エラーファイル保存処理を削除）
+    // エラー情報のログ出力
     console.error('エラーが発生しました: ', error);
     console.error('ファイル処理に失敗: ' + fileName);
   }
