@@ -8,6 +8,7 @@ exports.textAnalyzeVertexGemini = onObjectFinalized({
   bucket: 'cosmetic-ingredient-analysis.firebasestorage.app',
   eventType: 'google.storage.object.finalize',
   matchPath: '/cosmes/**/ocr_result.txt',  // ocr_result.txtファイルのみ処理
+  memory: '512MiB', // メモリ制限を512MiBに増やす
 }, async (event) => {
   const file = event.data;
   const fileName = file.name;
@@ -48,19 +49,33 @@ exports.textAnalyzeVertexGemini = onObjectFinalized({
     const location = 'us-central1'; // 適切なロケーションを設定
     const vertexAI = new VertexAI({project: projectId, location: location});
     
-    // Gemini 1.5 Flash モデルのインスタンスを取得
+    // Gemini 2.0 Flash モデルのインスタンスを取得
     const generativeModel = vertexAI.preview.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.0-flash',
     });
 
     // プロンプトの作成 - OCR結果とプロファイルを別々に指定
     const prompt = `
 あなたはスキンケア製品の成分分析AIです。与えられたOCR結果とユーザープロフィールを元に、製品の成分を分析し、ユーザーの肌質や敏感性に合うかどうかを評価してください。
 
-OCR結果には製品名と検出された成分リストが含まれています。各成分について：
+OCR結果には製品名と検出された成分リストが含まれています：
 ${ocrText}
 
-を分析してください。
+重要: 提供されたテキストが化粧品やスキンケア製品でない場合、または化粧品成分が検出できない場合は、以下のフォーマットで返してください：
+{
+  "product_name": "識別された製品名または「不明」",
+  "analysis_type": "成分分析結果",
+  "ingredients": [
+    {
+      "name": "なし",
+      "rating": "評価なし",
+      "effect": "成分が検出されませんでした"
+    }
+  ],
+  "overall_assessment": "この製品は化粧品ではないか、成分情報が検出できませんでした。"
+}
+
+化粧品成分が検出された場合は、各成分について分析してください。
 
 ユーザープロフィール：
 ${profileText}
@@ -86,19 +101,9 @@ ${profileText}
       "name": "ヒアルロン酸",
       "rating": "良好",
       "effect": "保湿効果が高く、乾燥肌に適しています"
-    },
-    {
-      "name": "パラベン",
-      "rating": "やや注意",
-      "effect": "防腐剤。敏感肌の方は注意が必要です"
-    },
-    {
-      "name": "香料",
-      "rating": "不適合",
-      "effect": "人工香料にアレルギー反応がある可能性があります"
     }
   ],
-  "overall_assessment": "この製品は基本的な保湿成分は優れていますが、含有されている防腐剤と香料が肌質に合わない可能性があります。無香料タイプを検討されることをお勧めします。"
+  "overall_assessment": "この製品は保湿成分が優れており、乾燥肌の方に適しています。"
 }`;
 
     // Vertex AI Gemini API を呼び出し
