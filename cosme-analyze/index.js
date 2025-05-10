@@ -146,36 +146,43 @@ async function analyzeWithGemini(ocrText, profileText, barcode) {
   }
 }
 
-/**
- * 分析結果をBigQueryに保存する関数
- * @param {Object} analysisResult - 分析結果
- * @param {string} originalText - 元のテキスト
- * @param {string} uid - ユーザーID
- * @param {string} folderPath - フォルダパス
- * @returns {Promise<void>}
- */
-async function saveToBigQuery(analysisResult, originalText, uid, folderPath) {
+async function saveScanLogToBigQuery({ user_id, product_id, ocr_text, analysis_results }) {
   try {
-    const datasetId = 'cosmetic_analysis';
-    const tableId = 'analysis_results';
-    
-    const rows = [{
-      timestamp: new Date().toISOString(),
-      original_text: originalText,
-      analysis_result: JSON.stringify(analysisResult),
-      user_id: uid,
-      folder_path: folderPath,
-      created_at: new Date().toISOString()
+    const datasetId = 'app_data';
+    const tableId = 'scanlogs';
+
+    // 1. 現在の最大IDを取得
+    const [rows] = await bigquery.query(`
+      SELECT MAX(id) as max_id FROM \`${datasetId}.${tableId}\`
+    `);
+    const maxId = rows[0].max_id || 0;
+    const newId = maxId + 1;
+
+    // 2. 新しいレコードを作成
+    const insertRows = [{
+      id: newId,
+      user_id,
+      barcode: product_id,
+      ocr_result: ocr_text,
+      analysis_result: JSON.stringify(analysis_results),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }];
-    
-    await bigquery
-      .dataset(datasetId)
-      .table(tableId)
-      .insert(rows);
-      
-    console.log('分析結果をBigQueryに保存しました');
+
+    // 3. 挿入
+    await bigquery.dataset(datasetId).table(tableId).insert(insertRows);
+    console.log('scanlogsに保存しました');
   } catch (error) {
-    console.error('BigQueryへの保存中にエラーが発生しました:', error);
+    console.error('scanlogs保存エラー:', error);
+
+    // insertErrorsの詳細を出力
+    if (error && error.errors) {
+      console.error('insertErrors:', JSON.stringify(error.errors, null, 2));
+    }
+    if (error && error.insertErrors) {
+      console.error('insertErrors:', JSON.stringify(error.insertErrors, null, 2));
+    }
+
     throw error;
   }
 }
@@ -208,8 +215,14 @@ exports.analyzeIngredients = onRequest({
     // Geminiで分析
     const analysisResult = await analyzeWithGemini(ocrText, profileText, barcode);
     
-    // BigQueryに保存
-    // await saveToBigQuery(analysisResult, ocrText, uid, folderPath);
+
+    // Bigquery:scanlogsに保存
+    await saveScanLogToBigQuery({
+      user_id: uid,
+      product_id: barcode,
+      ocr_text: ocrText,
+      analysis_results: analysisResult
+    });
 
     // レスポンス
     console.log("ocrText: ${ocrText}");
