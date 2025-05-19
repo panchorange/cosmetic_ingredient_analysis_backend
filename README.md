@@ -6,3 +6,4 @@ cosmetic_ingredient_analysisのバックエンド処理(firebase)
 cd cosme-analyze
 firebase deploy --only functions:analyzeIngredients --project cosmetic-ingredient-analysis
 ```
+test
