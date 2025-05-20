@@ -1,8 +1,10 @@
 const { initializeApp } = require('firebase-admin/app');
+const vision = require('@google-cloud/vision');
 const { getStorage } = require('firebase-admin/storage');
 const { onRequest } = require('firebase-functions/v2/https');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { VertexAI } = require('@google-cloud/vertexai');
+const { Storage } = require('@google-cloud/storage');
 
 // Firebase Adminを初期化
 initializeApp();
@@ -10,37 +12,14 @@ initializeApp();
 // BigQueryクライアントを初期化
 const bigquery = new BigQuery();
 
+// Cloud Vision APIクライアントを初期化
+const visionClient = new vision.ImageAnnotatorClient();
+
 // Vertex AIクライアントを初期化
 const vertexAI = new VertexAI({
   project: "cosmetic-ingredient-analysis",
   location: "asia-northeast1",
 });
-
-/**
- * OCR結果ファイルを読み込む関数
- * @param {string} folderPath - OCR結果が保存されているフォルダパス
- * @returns {Promise<string>} - OCR結果のテキスト
- */
-async function readOCRResult(folderPath) {
-  try {
-    const storage = getStorage();
-    const bucket = storage.bucket('cosmetic-ingredient-analysis.firebasestorage.app');
-    const filePath = `${folderPath}/ocr_result.txt`;
-    
-    const file = bucket.file(filePath);
-    const [exists] = await file.exists();
-    
-    if (!exists) {
-      throw new Error(`OCR結果ファイルが見つかりません: ${filePath}`);
-    }
-    
-    const [content] = await file.download();
-    return content.toString('utf-8');
-  } catch (error) {
-    console.error('OCR結果の読み込み中にエラーが発生しました:', error);
-    throw error;
-  }
-}
 
 async function readProfile(folderPath) {
   try {
@@ -65,7 +44,7 @@ async function readProfile(folderPath) {
  * @param {string} text - 分析対象のテキスト
  * @returns {Promise<Object>} - 分析結果
  */
-async function analyzeWithGemini(ocrText, profileText, barcode) {
+async function analyzeCosmeIngredients(ocrText, profileText, barcode) {
   try {
     const generativeModel = vertexAI.getGenerativeModel({
       model: 'gemini-1.5-flash',
@@ -79,20 +58,8 @@ async function analyzeWithGemini(ocrText, profileText, barcode) {
       
       バーコード：${barcode}
       
-      重要: 提供されたテキストが化粧品やスキンケア製品でない場合、または化粧品成分が検出できない場合は、以下のフォーマットで返してください：
-      {
-        "product_name": "識別された製品名または「不明」",
-        "analysis_type": "成分分析結果",
-        "ingredients": [
-          {
-            "name": "なし",
-            "rating": "評価なし",
-            "effect": "成分が検出されませんでした"
-          }
-        ],
-        "overall_assessment": "この製品は化粧品ではないか、成分情報が検出できませんでした。"
-      }
-      
+      重要: 
+        - 提供されたテキストが化粧品やスキンケア製品でない場合、JSONフォーマットは同じで、is_cosmeをfalseにしてください。また、overall_assessmentでは、製品が化粧品でないことを明記してください。
       化粧品成分が検出された場合は、各成分について分析してください。
       
       ユーザープロフィール：
@@ -106,15 +73,22 @@ async function analyzeWithGemini(ocrText, profileText, barcode) {
       総合評価（overall_assessment）も必ず日本語で記述してください。
       
       overall_assessmentでは、以下の点を含めて総合的に評価してください。
-      ・製品の成分がユーザーの肌タイプ（乾燥、脂性、混合、敏感、普通）に合っているか
-      ・製品の成分がユーザーの肌悩み（ニキビ、乾燥、シミ、くすみ、毛穴、しわ/たるみ）に合っているか
-      ・ユーザーの希望する効果（保湿、美白、エイジングケア、ニキビケア、毛穴ケア、UVケア）に合致しているか
-      ・ユーザーが避けたい成分が含まれていないか
-      ・ユーザーの特記事項が考慮されているか
+      - 製品の成分がユーザーの肌タイプ（乾燥、脂性、混合、敏感、普通）に合っているか
+      - 製品の成分がユーザーの肌悩み（ニキビ、乾燥、シミ、くすみ、毛穴、しわ/たるみ）に合っているか
+      - ユーザーの希望する効果（保湿、美白、エイジングケア、ニキビケア、毛穴ケア、UVケア）に合致しているか
+      - ユーザーが避けたい成分が含まれていないか
+      - ユーザーの特記事項が考慮されているか
         
       例：
+      注意:
+        - is_cosmeは化粧品の場合はtrue、それ以外の場合はfalse
+        - price_infered_without_tax_yenは推定価格（税込み）
       {
-        "product_name": "モイスチャーローション",
+        "product_name": "モイスチャー乳液",
+        "company_name": "花王",
+        "category": "乳液",
+        "price_infered_without_tax_yen": 1200,
+        "is_cosme": true,
         "analysis_type": "成分分析結果",
         "ingredients": [
           {
@@ -134,6 +108,7 @@ async function analyzeWithGemini(ocrText, profileText, barcode) {
     const result = await generativeModel.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
     });
+    console.log(`result(gemini): ${result}`);
 
     const response = await result.response;
     let response_text = response.candidates[0].content.parts[0].text;
@@ -146,36 +121,178 @@ async function analyzeWithGemini(ocrText, profileText, barcode) {
   }
 }
 
-/**
- * 分析結果をBigQueryに保存する関数
- * @param {Object} analysisResult - 分析結果
- * @param {string} originalText - 元のテキスト
- * @param {string} uid - ユーザーID
- * @param {string} folderPath - フォルダパス
- * @returns {Promise<void>}
- */
-async function saveToBigQuery(analysisResult, originalText, uid, folderPath) {
+async function saveScanLogToBigQuery({ user_id, product_id, ocr_text, analysis_results }) {
   try {
-    const datasetId = 'cosmetic_analysis';
-    const tableId = 'analysis_results';
-    
-    const rows = [{
-      timestamp: new Date().toISOString(),
-      original_text: originalText,
-      analysis_result: JSON.stringify(analysisResult),
-      user_id: uid,
-      folder_path: folderPath,
-      created_at: new Date().toISOString()
+    const datasetId = 'app_data';
+    const tableId = 'scanlogs';
+
+    // 1. 現在の最大IDを取得
+    const [rows] = await bigquery.query(`
+      SELECT MAX(id) as max_id FROM \`${datasetId}.${tableId}\`
+    `);
+    const maxId = rows[0].max_id || 0;
+    const newId = maxId + 1;
+
+    // 2. 新しいレコードを作成
+    const insertRows = [{
+      id: newId,
+      user_id: user_id,
+      barcode: product_id,
+      ocr_result: ocr_text,
+      analysis_result: JSON.stringify(analysis_results),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }];
-    
-    await bigquery
-      .dataset(datasetId)
-      .table(tableId)
-      .insert(rows);
-      
-    console.log('分析結果をBigQueryに保存しました');
+
+    // 3. 挿入
+    await bigquery.dataset(datasetId).table(tableId).insert(insertRows);
+    console.log('scanlogsに保存しました');
   } catch (error) {
-    console.error('BigQueryへの保存中にエラーが発生しました:', error);
+    console.error('scanlogs保存エラー:', error);
+
+    // insertErrorsの詳細を出力
+    if (error && error.errors) {
+      console.error('insertErrors:', JSON.stringify(error.errors, null, 2));
+    }
+    if (error && error.insertErrors) {
+      console.error('insertErrors:', JSON.stringify(error.insertErrors, null, 2));
+    }
+
+    throw error;
+  }
+}
+
+async function lengthUserProfileAtBigQuery(userProfileJson) {
+  const datasetId = 'app_data';
+  const tableId = 'users';
+
+  console.log('lengthUserProfileAtBigQuery');
+  console.log('Debug - userProfileJson:', JSON.stringify(userProfileJson, null, 2));
+  console.log('Debug - userProfileJson.uid:', userProfileJson?.uid);
+  const query = `
+    SELECT id 
+    FROM \`cosmetic-ingredient-analysis.${datasetId}.${tableId}\` 
+    WHERE id = '${userProfileJson.uid}'
+  `;
+
+  const [rows] = await bigquery.query(query);
+  return rows.length;
+}
+
+// 製品データをBigQueryに保存
+async function saveProductDataToBigQuery(analysisResult, barcode) {
+  const datasetId = 'app_data';
+  const tableId = 'products';
+
+  console.log('saveProductDataToBigQuery');
+  console.log('Debug - analysisResult:', JSON.stringify(analysisResult, null, 2));
+  console.log('Debug - barcode:', barcode);
+
+
+  // 1 製品がテーブルに存在するか確認
+  const [rows] = await bigquery.query(`
+    SELECT id FROM \`cosmetic-ingredient-analysis.${datasetId}.${tableId}\` 
+    WHERE id = '${barcode}'
+  `);
+
+  if (rows.length >= 1) {
+    console.log('製品はすでに存在します。INSERTをスキップします。');
+    return;
+  }
+
+  console.log('saveProductDataToBigQuery 2');
+  console.log("typeof: analysisResult:", typeof analysisResult);
+  analysisResult = JSON.parse(analysisResult);
+  console.log('parsed analysisResult:', analysisResult);
+  console.log("typeof: barcode:", typeof barcode);
+  const ingredientNames = analysisResult.ingredients.map(ingredient => ingredient.name);
+  console.log('抽出された成分名:', ingredientNames);
+
+  const insertRow = {
+    id: barcode,
+    product_name: analysisResult.product_name,
+    company_name: analysisResult.company_name,
+    category: analysisResult.category,
+    ingredients: ingredientNames,
+    price_infered_without_tax: analysisResult.price_infered_without_tax_yen,
+    is_cosme: analysisResult.is_cosme,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  try {
+    // 3. insert
+    await bigquery.dataset(datasetId).table(tableId).insert([insertRow]);
+    console.log('製品データをBigQueryに保存しました');
+  } catch (error) {
+    console.error('BigQueryへの挿入エラー(製品テーブル):', error);
+    throw error;
+  }
+}
+// ユーザープロフィールをBigQueryに保存
+async function saveUserProfileToBigQuery(userProfileJson) {
+  const datasetId = 'app_data';
+  const tableId = 'users';
+
+  console.log('Debug - userProfileJson:', JSON.stringify(userProfileJson, null, 2));
+  console.log('Debug - userProfileJson.uid:', userProfileJson?.uid);
+
+  // 1. 既存ユーザー確認
+  console.log('saveUserProfileToBigQuery');
+  const [rows] = await bigquery.query(`
+    SELECT id FROM \`cosmetic-ingredient-analysis.${datasetId}.${tableId}\` 
+    WHERE id = '${userProfileJson.uid}'
+  `);
+
+  console.log('rows.length:', rows.length);
+
+  if (rows.length >= 1) {
+    console.log('User already exists, skipping insert.');
+    return;
+  }
+
+  // 2. データ整形 - ARRAY型に合わせて修正
+  const insertRow = {
+    id: userProfileJson['uid'],
+    birth_date: userProfileJson['birth_date'] ? userProfileJson['birth_date'].slice(0, 10) : null,
+    gender: userProfileJson['gender'] || null,
+    skin_type: userProfileJson['skin_type'] || null,
+    
+    skin_problems: Array.isArray(userProfileJson['skin_problems']) 
+    ? userProfileJson['skin_problems'] 
+    : (userProfileJson['skin_problems'] ? [userProfileJson['skin_problems']] : []),
+    
+    ingredients_to_avoid: Array.isArray(userProfileJson['ingredients_to_avoid']) 
+    ? userProfileJson['ingredients_to_avoid'] 
+    : (userProfileJson['ingredients_to_avoid'] ? [userProfileJson['ingredients_to_avoid']] : []),
+    
+    desired_effect: Array.isArray(userProfileJson['desired_effect']) 
+    ? userProfileJson['desired_effect'] 
+    : (userProfileJson['desired_effect'] ? [userProfileJson['desired_effect']] : []),
+    
+    user_memo: userProfileJson['note'] || null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  
+  // エラーハンドリングを強化
+  try {
+    // 3. insert
+    await bigquery.dataset(datasetId).table(tableId).insert([insertRow]);
+    console.log('ユーザープロフィールをBigQueryに保存しました');
+  } catch (error) {
+    console.error('BigQueryへの挿入エラー(ユーザーテーブル):', error);
+    
+    // エラーの詳細情報を出力
+    if (error.errors) {
+      error.errors.forEach((err, i) => {
+        console.error(`エラー ${i}:`, err);
+      });
+    }
+    if (error.response && error.response.insertErrors) {
+      console.error('挿入エラー詳細:', JSON.stringify(error.response.insertErrors, null, 2));
+    }
+    
     throw error;
   }
 }
@@ -188,32 +305,59 @@ exports.analyzeIngredients = onRequest({
 }, async (req, res) => {
   try {
     // リクエストボディからデータを取得
-    const { folderPath, uid, barcode } = req.body;
-    console.log("folderPath, uid:${folderPath}, ${uid}");
-    if (!folderPath || !uid) {
+    const { firebaseFolderPath, barcode, userProfileJson } = req.body;
+    console.log(`firebaseFolderPath, barcode, userProfileJson:${firebaseFolderPath}, ${barcode}, ${userProfileJson}`);
+    if (!firebaseFolderPath || !barcode || !userProfileJson) {
       res.status(400).json({
         error: '必要なパラメータが不足しています'
       });
       return;
     }
+    console.log("barcode(関数開始):", barcode);
 
     // OCR結果を読み込む
-    const ocrText = await readOCRResult(folderPath);
-    console.log("ocrText: ${ocrText}");
+    const ocrText = await getOcrResult(firebaseFolderPath);
+    console.log(`ocrText: ${ocrText}`);
 
     // ユーザープロフィールを読み込む
-    const profileText = await readProfile(folderPath);
-    console.log("profileText: ${profileText}");
+    const profileText = await readProfile(firebaseFolderPath);
+    console.log(`profileText: ${profileText}`);
+
+    // プロフィール情報
 
     // Geminiで分析
-    const analysisResult = await analyzeWithGemini(ocrText, profileText, barcode);
+    const analysisResult = await analyzeCosmeIngredients(
+      ocrText,
+      profileText,
+      barcode
+    );
+    console.log(`analysisResult: ${analysisResult}`);
+    console.log(`typeof: analysisResult: ${typeof analysisResult}`);
     
-    // BigQueryに保存
-    // await saveToBigQuery(analysisResult, ocrText, uid, folderPath);
+    // Bigquery:scanlogsに保存
+    await saveScanLogToBigQuery({
+      user_id: userProfileJson.uid,
+      product_id: barcode,
+      ocr_text: ocrText,
+      analysis_results: analysisResult
+    });
 
-    // レスポンス
-    console.log("ocrText: ${ocrText}");
-    console.log("analysisResult: ${analysisResult}");
+    user_length = await lengthUserProfileAtBigQuery(userProfileJson);
+    console.log(`user_length: ${user_length}`);
+    console.log(`userProfileJson['uid']: ${userProfileJson['uid']}`);
+    if (user_length === 0) {
+      await saveUserProfileToBigQuery(userProfileJson);
+    }
+
+     // レスポンス
+    console.log(`analysisResult(JSON.stringify): ${JSON.stringify(analysisResult)}`);
+    console.log(`typeof: analysisResult: ${typeof analysisResult}`);
+    await saveProductDataToBigQuery(
+      analysisResult, barcode
+    );
+  
+
+
     res.status(200).json({
       success: true,
       data: {
@@ -231,3 +375,24 @@ exports.analyzeIngredients = onRequest({
     });
   }
 });
+
+async function getOcrResult(firebaseFolderPath) {
+  // 画像ファイルのStorageパス
+  const storage = new Storage();
+  const bucketName = 'cosmetic-ingredient-analysis.firebasestorage.app';
+  const filePath = `${firebaseFolderPath}/ocr_source.jpg`;
+  const gcsUri = `gs://${bucketName}/${filePath}`;
+
+  // OCR実行
+  console.log('テキスト検出を開始します');
+  const [textDetection] = await visionClient.textDetection(gcsUri);
+  const detectedText = textDetection.fullTextAnnotation ? textDetection.fullTextAnnotation.text : '';
+  console.log('検出されたテキスト:', detectedText);
+
+  // OCR結果をStorageに保存（必要なら）
+  const resultFile = storage.bucket(bucketName).file(`${firebaseFolderPath}/ocr_result.txt`);
+  await resultFile.save(detectedText, { contentType: 'text/plain' });
+
+  return detectedText;
+}
+
