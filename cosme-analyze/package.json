@@ -12,13 +12,13 @@
   "engines": {
     "node": "22"
   },
-  "main": "index.js",
+  "main": "src/index.js",
   "dependencies": {
     "@google-cloud/bigquery": "^7.9.4",
     "@google-cloud/vertexai": "^0.5.0",
     "@google-cloud/vision": "^5.1.0",
     "firebase-admin": "^12.7.0",
-    "firebase-functions": "^4.9.0"
+    "firebase-functions": "^6.3.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.27.0",
