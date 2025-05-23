@@ -23,8 +23,8 @@ module.exports = {
   // VertexAI設定
   vertexAI: {
     project: process.env.GCP_PROJECT_ID || 'cosmetic-ingredient-analysis',
-    location: process.env.GCP_LOCATION || 'asia-northeast1',
-    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash'
+    location: process.env.GCP_LOCATION || 'us-central1',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash'
   },
   
   // Firebase Functions設定
