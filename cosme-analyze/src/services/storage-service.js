@@ -22,16 +22,19 @@ class StorageService {
       const bucket = this.storage.bucket(this.bucketName);
       const filePath = `${folderPath}/${fileName}`;
       const file = bucket.file(filePath);
-      
+
       const [exists] = await file.exists();
       if (!exists) {
         throw new Error(`ファイルが見つかりません: ${filePath}`);
       }
-      
+
       const [content] = await file.download();
       return content.toString('utf-8');
     } catch (error) {
-      console.error(`ファイル読み込み中にエラーが発生しました (${fileName}):`, error);
+      console.error(
+        `ファイル読み込み中にエラーが発生しました (${fileName}):`,
+        error
+      );
       throw error;
     }
   }

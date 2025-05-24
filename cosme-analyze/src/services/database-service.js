@@ -35,18 +35,23 @@ class DatabaseService {
       const newId = maxId + 1;
 
       // 新しいレコードを作成
-      const insertRows = [{
-        id: newId,
-        user_id: user_id,
-        barcode: product_id,
-        ocr_result: ocr_text,
-        analysis_result: analysis_results,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }];
+      const insertRows = [
+        {
+          id: newId,
+          user_id: user_id,
+          barcode: product_id,
+          ocr_result: ocr_text,
+          analysis_result: analysis_results,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ];
 
       // 挿入
-      await this.bigquery.dataset(this.datasetId).table(tableId).insert(insertRows);
+      await this.bigquery
+        .dataset(this.datasetId)
+        .table(tableId)
+        .insert(insertRows);
       console.log('scanlogsに保存しました');
     } catch (error) {
       console.error('scanlogs保存エラー:', error);
@@ -77,8 +82,13 @@ class DatabaseService {
       }
 
       // 文字列の場合はJSONにパース
-      const analysisObj = typeof analysisResult === 'string' ? JSON.parse(analysisResult) : analysisResult;
-      const ingredientNames = analysisObj.ingredients.map(ingredient => ingredient.name);
+      const analysisObj =
+        typeof analysisResult === 'string'
+          ? JSON.parse(analysisResult)
+          : analysisResult;
+      const ingredientNames = analysisObj.ingredients.map(
+        (ingredient) => ingredient.name
+      );
 
       const insertRow = {
         id: barcode,
@@ -93,7 +103,10 @@ class DatabaseService {
       };
 
       // 挿入
-      await this.bigquery.dataset(this.datasetId).table(tableId).insert([insertRow]);
+      await this.bigquery
+        .dataset(this.datasetId)
+        .table(tableId)
+        .insert([insertRow]);
       console.log('製品データをBigQueryに保存しました');
     } catch (error) {
       console.error('BigQueryへの挿入エラー(製品テーブル):', error);
@@ -123,9 +136,12 @@ class DatabaseService {
 
       // データ整形 - ARRAY型に合わせて修正
       const insertRow = this.formatUserProfileForInsert(userProfileJson);
-      
+
       // 挿入
-      await this.bigquery.dataset(this.datasetId).table(tableId).insert([insertRow]);
+      await this.bigquery
+        .dataset(this.datasetId)
+        .table(tableId)
+        .insert([insertRow]);
       console.log('ユーザープロフィールをBigQueryに保存しました');
     } catch (error) {
       console.error('BigQueryへの挿入エラー(ユーザーテーブル):', error);
@@ -164,22 +180,32 @@ class DatabaseService {
   formatUserProfileForInsert(userProfileJson) {
     return {
       id: userProfileJson['uid'],
-      birth_date: userProfileJson['birth_date'] ? userProfileJson['birth_date'].slice(0, 10) : null,
+      birth_date: userProfileJson['birth_date']
+        ? userProfileJson['birth_date'].slice(0, 10)
+        : null,
       gender: userProfileJson['gender'] || null,
       skin_type: userProfileJson['skin_type'] || null,
-      
-      skin_problems: Array.isArray(userProfileJson['skin_problems']) 
-        ? userProfileJson['skin_problems'] 
-        : (userProfileJson['skin_problems'] ? [userProfileJson['skin_problems']] : []),
-      
-      ingredients_to_avoid: Array.isArray(userProfileJson['ingredients_to_avoid']) 
-        ? userProfileJson['ingredients_to_avoid'] 
-        : (userProfileJson['ingredients_to_avoid'] ? [userProfileJson['ingredients_to_avoid']] : []),
-      
-      desired_effect: Array.isArray(userProfileJson['desired_effect']) 
-        ? userProfileJson['desired_effect'] 
-        : (userProfileJson['desired_effect'] ? [userProfileJson['desired_effect']] : []),
-      
+
+      skin_problems: Array.isArray(userProfileJson['skin_problems'])
+        ? userProfileJson['skin_problems']
+        : userProfileJson['skin_problems']
+          ? [userProfileJson['skin_problems']]
+          : [],
+
+      ingredients_to_avoid: Array.isArray(
+        userProfileJson['ingredients_to_avoid']
+      )
+        ? userProfileJson['ingredients_to_avoid']
+        : userProfileJson['ingredients_to_avoid']
+          ? [userProfileJson['ingredients_to_avoid']]
+          : [],
+
+      desired_effect: Array.isArray(userProfileJson['desired_effect'])
+        ? userProfileJson['desired_effect']
+        : userProfileJson['desired_effect']
+          ? [userProfileJson['desired_effect']]
+          : [],
+
       user_memo: userProfileJson['note'] || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -195,7 +221,10 @@ class DatabaseService {
       console.error('insertErrors:', JSON.stringify(error.errors, null, 2));
     }
     if (error && error.response && error.response.insertErrors) {
-      console.error('insertErrors詳細:', JSON.stringify(error.response.insertErrors, null, 2));
+      console.error(
+        'insertErrors詳細:',
+        JSON.stringify(error.response.insertErrors, null, 2)
+      );
     }
   }
 }
