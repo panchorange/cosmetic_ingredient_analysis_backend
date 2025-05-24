@@ -26,7 +26,9 @@ class OcrService {
       // OCR実行
       console.log('テキスト検出を開始します');
       const [textDetection] = await this.visionClient.textDetection(gcsUri);
-      const detectedText = textDetection.fullTextAnnotation ? textDetection.fullTextAnnotation.text : '';
+      const detectedText = textDetection.fullTextAnnotation
+        ? textDetection.fullTextAnnotation.text
+        : '';
       console.log('検出されたテキスト:', detectedText);
 
       // OCR結果をStorageに保存
@@ -47,7 +49,9 @@ class OcrService {
    */
   async saveOcrResult(folderPath, text) {
     try {
-      const resultFile = this.storage.bucket(this.bucketName).file(`${folderPath}/ocr_result.txt`);
+      const resultFile = this.storage
+        .bucket(this.bucketName)
+        .file(`${folderPath}/ocr_result.txt`);
       await resultFile.save(text, { contentType: 'text/plain' });
       console.log('OCR結果を保存しました');
     } catch (error) {

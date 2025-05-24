@@ -15,33 +15,36 @@ const config = require('./utils/config');
 initializeApp();
 
 // Firebase Function
-exports.analyzeIngredients = onRequest({
-  region: config.functions.region,
-  cors: config.functions.cors,
-  timeoutSeconds: config.functions.timeoutSeconds,
-}, async (req, res) => {
-  try {
-    // リクエストの検証
-    const { firebaseFolderPath, barcode, userProfileJson } = req.body;
-    
-    if (!firebaseFolderPath || !barcode || !userProfileJson) {
-      return res.status(400).json({
-        error: '必要なパラメータが不足しています'
+exports.analyzeIngredients = onRequest(
+  {
+    region: config.functions.region,
+    cors: config.functions.cors,
+    timeoutSeconds: config.functions.timeoutSeconds,
+  },
+  async (req, res) => {
+    try {
+      // リクエストの検証
+      const { firebaseFolderPath, barcode, userProfileJson } = req.body;
+
+      if (!firebaseFolderPath || !barcode || !userProfileJson) {
+        return res.status(400).json({
+          error: '必要なパラメータが不足しています',
+        });
+      }
+
+      // アプリケーションのインスタンス化と処理実行
+      const app = new CosmeticAnalysisApp();
+      const result = await app.analyzeIngredients(req.body);
+
+      // 成功レスポンス
+      res.status(200).json(result);
+    } catch (error) {
+      // エラーレスポンス
+      console.error('リクエスト処理中にエラーが発生しました:', error);
+      res.status(500).json({
+        error: 'サーバーエラーが発生しました',
+        message: error.message,
       });
     }
-    
-    // アプリケーションのインスタンス化と処理実行
-    const app = new CosmeticAnalysisApp();
-    const result = await app.analyzeIngredients(req.body);
-    
-    // 成功レスポンス
-    res.status(200).json(result);
-  } catch (error) {
-    // エラーレスポンス
-    console.error('リクエスト処理中にエラーが発生しました:', error);
-    res.status(500).json({
-      error: 'サーバーエラーが発生しました',
-      message: error.message
-    });
   }
-});
+);

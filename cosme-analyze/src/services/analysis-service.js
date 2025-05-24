@@ -30,16 +30,16 @@ class AnalysisService {
       const result = await generativeModel.generateContent({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
       });
-      
+
       const response = await result.response;
       let responseText = response.candidates[0].content.parts[0].text;
-      
+
       // コードブロックマーカーやバッククォートを除去
       responseText = responseText.replace(/```json|```|`/g, '').trim();
 
       // ここでresponseText (JSON形式の文字列) をログに出力します
       console.log(`Gemini分析結果 (JSON): ${responseText}`);
-      
+
       return responseText;
     } catch (error) {
       console.error('Gemini分析中にエラーが発生しました:', error);
@@ -107,6 +107,7 @@ ${profileText}
 - 改行エスケープ（\\n）は使用しない
 - 日本語で記述
 - そのまま使用可能なJSON形式
+- **overall_assessmentは150文字以内で簡潔にまとめる**
 
 ### 出力例
 
