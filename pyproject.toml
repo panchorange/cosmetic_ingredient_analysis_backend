@@ -6,4 +6,5 @@ readme = "README.md"
 requires-python = ">=3.11.9"
 dependencies = [
     "dbt-bigquery>=1.9.1",
+    "ipykernel>=6.29.5",
 ]
