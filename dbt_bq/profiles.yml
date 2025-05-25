@@ -1,0 +1,12 @@
+cosme_analysis:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: cosmetic-ingredient-analysis
+      dataset: app_data   # ← ここはdbt用のデータセット名
+      location: asia-northeast1   # ← ここを追加
+      threads: 1
+      keyfile: config/cosmetic-ingredient-analysis_dbt_service_account.json
+

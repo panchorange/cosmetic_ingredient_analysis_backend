@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: app_data
+    description: "app_data スキーマ内のテーブル群"
+    database: cosmetic-ingredient-analysis
+    schema: app_data
+    tables:
+      - name: products
+        description: "製品テーブル"
+      - name: scanlogs
+        description: "スキャンログテーブル"
+      - name: users
+        description: "ユーザーテーブル" 
