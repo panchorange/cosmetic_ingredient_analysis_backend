@@ -3,6 +3,8 @@
  */
 
 const { VertexAI } = require('@google-cloud/vertexai');
+const { GoogleAuth } = require('google-auth-library');
+const path = require('path');
 const config = require('../utils/config');
 
 class AnalysisService {
@@ -11,6 +13,75 @@ class AnalysisService {
       project: config.vertexAI.project,
       location: config.vertexAI.location,
     });
+  }
+
+  /**
+   * ベクトル検索を実行する
+   * @param {string} query - 検索クエリ
+   * @returns {Promise<Array>} - 検索結果
+   */
+  async performVectorSearch(query) {
+    try {
+      console.log('🔑 サービスアカウントで認証中...');
+
+      // サービスアカウントキーファイルのパスを指定
+      const keyFilePath = path.join(
+        __dirname,
+        '../config/vertex-ai-search_cosem-analyze.json'
+      );
+
+      // Google Auth Libraryを使用して認証
+      const auth = new GoogleAuth({
+        keyFile: keyFilePath,
+        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      });
+
+      // アクセストークンを取得
+      const authClient = await auth.getClient();
+      const accessToken = await authClient.getAccessToken();
+
+      console.log('✅ 認証成功');
+
+      const url =
+        'https://discoveryengine.googleapis.com/v1/projects/cosmetic-ingredient-analysis/locations/global/collections/default_collection/dataStores/cosme-ingredient-bucket-datastore_1749650091742/servingConfigs/default_search:search';
+
+      console.log('🔍 検索URL:', url);
+      console.log('🔍 検索クエリ:', query);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: query,
+          pageSize: 10,
+          queryExpansionSpec: {
+            condition: 'AUTO',
+          },
+          spellCorrectionSpec: {
+            mode: 'AUTO',
+          },
+        }),
+      });
+
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ エラーレスポンス:', errorText);
+        throw new Error(`API Error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+
+      return data.results || [];
+
+    } catch (error) {
+      console.error('🚫 ベクトル検索エラー:', error);
+      // エラーが発生した場合は空の配列を返して処理を継続
+      return [];
+    }
   }
 
   /**
@@ -26,7 +97,18 @@ class AnalysisService {
         model: config.vertexAI.model,
       });
 
-      const prompt = this.createAnalysisPrompt(ocrText, profileText, barcode);
+      // ベクトル検索を実行
+      console.log('🔍 ベクトル検索を実行中...');
+      const searchQuery = `この肌質に適した成分と避けるべき成分: ${profileText}`;
+      const vectorSearchResults = await this.performVectorSearch(searchQuery);
+      console.log('✅ ベクトル検索完了');
+
+      const prompt = this.createAnalysisPrompt(
+        ocrText,
+        profileText,
+        barcode,
+        vectorSearchResults
+      );
       const result = await generativeModel.generateContent({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
       });
@@ -52,9 +134,27 @@ class AnalysisService {
    * @param {string} ocrText - OCRで検出されたテキスト
    * @param {string} profileText - ユーザープロファイル
    * @param {string} barcode - 製品のバーコード
+   * @param {Array} vectorSearchResults - ベクトル検索結果
    * @returns {string} - 分析用プロンプト
    */
-  createAnalysisPrompt(ocrText, profileText, barcode) {
+  createAnalysisPrompt(ocrText, profileText, barcode, vectorSearchResults) {
+    // ベクトル検索結果からcontentのみを抽出
+    const extractedContents = vectorSearchResults
+      .map((result, index) => {
+        const extractiveAnswers =
+          result.document?.derivedStructData?.extractive_answers || [];
+        const contents = extractiveAnswers
+          .map((answer) => answer.content)
+          .join('\n');
+        return contents ? `検索結果${index + 1}:\n${contents}` : '';
+      })
+      .filter((content) => content)
+      .join('\n\n');
+
+    const vectorSearchSection =
+      extractedContents || '関連情報が見つかりませんでした。';
+    console.log('ベクトル検索結果のコンテンツ:', vectorSearchSection);
+
     return `# スキンケア製品 成分分析AI
 
 あなたはスキンケア製品の成分分析を専門とするAIです。
@@ -70,6 +170,9 @@ ${barcode}
 
 ### ユーザープロフィール
 ${profileText}
+
+### 関連情報（ベクトル検索結果）
+${vectorSearchSection}
 
 ## 分析タスク
 
