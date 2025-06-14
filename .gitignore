@@ -89,3 +89,5 @@ ui-debug.log
 # OS files
 .DS_Store
 Thumbs.db
+
+cosme-analyze/src/config/vertex-ai-search_cosem-analyze.json
